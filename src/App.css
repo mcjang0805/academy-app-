@@ -1,184 +1,725 @@
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  margin-bottom: 24px;
+import { useState, useRef } from "react";
+import * as XLSX from "xlsx";
 
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+const REVIEW_SUBJECTS = ["헌법","형법","형소법","경찰학"];
+const EXAM_SUBJECTS   = ["헌법","형사법","경찰학"];
+const PERIOD_LABELS   = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
+function dateToPeriod(d){ return (new Date(d).getMonth()+1)+"월"; }
+function defaultPw(id){ return String(id||""); }
+function parseDate(v){
+  if(!v) return "";
+  if(typeof v==="number") return new Date(Math.round((v-25569)*86400*1000)).toISOString().slice(0,10);
+  return String(v).trim().replace(/\./g,"-").replace(/\//g,"-");
+}
+function scoreBg(s){ if(s==null) return "#E5E7EB"; return s>=90?"#10B981":s>=75?"#4F46E5":s>=60?"#F59E0B":"#EF4444"; }
+
+const C={
+  primary:"#4F46E5",primaryLight:"#EEF2FF",
+  accent:"#10B981",accentLight:"#D1FAE5",
+  warning:"#F59E0B",warningLight:"#FEF3C7",
+  danger:"#EF4444",dangerLight:"#FEE2E2",
+  top20:"#F43F5E",
+  gray:"#6B7280",grayLight:"#F3F4F6",
+  white:"#FFFFFF",text:"#111827",textMuted:"#9CA3AF",
+  purple:"#8B5CF6",purpleLight:"#EDE9FE",
+  teal:"#0D9488",tealLight:"#CCFBF1",
+};
+const SC={헌법:"#6366F1",형법:"#EC4899",형소법:"#14B8A6",경찰학:"#F97316",형사법:"#8B5CF6"};
+const btn=(bg,color,ex)=>({background:bg,color:color||"#fff",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontWeight:600,fontSize:14,...(ex||{})});
+
+function ScorePill({score}){
+  if(score==null) return <span style={{color:C.textMuted}}>-</span>;
+  return <span style={{background:scoreBg(score),color:"#fff",borderRadius:20,padding:"2px 9px",fontWeight:700,fontSize:13}}>{score}점</span>;
 }
 
-.hero {
-  position: relative;
-
-  .base,
-  .framework,
-  .vite {
-    inset-inline: 0;
-    margin: 0 auto;
-  }
-
-  .base {
-    width: 170px;
-    position: relative;
-    z-index: 0;
-  }
-
-  .framework,
-  .vite {
-    position: absolute;
-  }
-
-  .framework {
-    z-index: 1;
-    top: 34px;
-    height: 28px;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
-      scale(1.4);
-  }
-
-  .vite {
-    z-index: 0;
-    top: 107px;
-    height: 26px;
-    width: auto;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
-      scale(0.8);
-  }
+function CompareChart({myPts,top20Pts,xLabels,color}){
+  const W=500,H=160,PL=38,PR=16,PT=20,PB=32,iW=W-PL-PR,iH=H-PT-PB;
+  const n=xLabels.length; if(!n) return null;
+  const xp=i=>PL+(i/Math.max(n-1,1))*iW;
+  const yp=v=>PT+iH-((v-40)/60)*iH;
+  const mkLine=pts=>{let d="";pts.forEach((p,i)=>{if(p==null)return;d+=(d===""||pts.slice(0,i).every(x=>x==null)?"M":"L")+xp(i)+","+yp(p)+" ";});return d.trim();};
+  return(
+    <div style={{overflowX:"auto"}}>
+      <svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",maxWidth:W,display:"block"}}>
+        {[40,55,70,85,100].map(t=>(
+          <g key={t}><line x1={PL} y1={yp(t)} x2={W-PR} y2={yp(t)} stroke="#E5E7EB" strokeWidth={1}/><text x={PL-4} y={yp(t)+4} textAnchor="end" fontSize={9} fill={C.textMuted}>{t}</text></g>
+        ))}
+        {top20Pts&&mkLine(top20Pts)&&<path d={mkLine(top20Pts)} fill="none" stroke={C.top20} strokeWidth={2} strokeDasharray="5,3"/>}
+        {top20Pts&&top20Pts.map((p,i)=>p!=null?<circle key={i} cx={xp(i)} cy={yp(p)} r={3} fill={C.top20}/>:null)}
+        {mkLine(myPts)&&<path d={mkLine(myPts)} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round"/>}
+        {myPts.map((p,i)=>p!=null?(<g key={i}><circle cx={xp(i)} cy={yp(p)} r={4} fill={color}/><text x={xp(i)} y={yp(p)-8} textAnchor="middle" fontSize={9} fontWeight="bold" fill={color}>{p}</text></g>):null)}
+        {xLabels.map((l,i)=><text key={i} x={xp(i)} y={H-4} textAnchor="middle" fontSize={9} fill={C.gray}>{l}</text>)}
+        <g transform={"translate("+PL+",8)"}><rect width={8} height={8} rx={2} fill={color}/><text x={11} y={8} fontSize={9} fill={color} fontWeight="bold">내 점수</text></g>
+        <g transform={"translate("+(PL+55)+",8)"}><line x1={0} y1={4} x2={8} y2={4} stroke={C.top20} strokeWidth={2} strokeDasharray="3,2"/><text x={11} y={8} fontSize={9} fill={C.top20} fontWeight="bold">상위 20%</text></g>
+      </svg>
+    </div>
+  );
 }
 
-#center {
-  display: flex;
-  flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
-
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
-}
-
-#next-steps {
-  display: flex;
-  border-top: 1px solid var(--border);
-  text-align: left;
-
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
+function OXTab({oxQuestions,setWrongNotes,studentId}){
+  const [subj,setSubj]=useState(REVIEW_SUBJECTS[0]);
+  const [dateTab,setDateTab]=useState(null);
+  const [answers,setAnswers]=useState({});
+  const [submitted,setSubmitted]=useState({});
+  const subjQs=oxQuestions.filter(q=>q.subject===subj);
+  const dates=[...new Set(subjQs.map(q=>q.date))].sort().reverse();
+  const activeDate=dateTab&&dates.includes(dateTab)?dateTab:(dates[0]||null);
+  const filtered=subjQs.filter(q=>q.date===activeDate);
+  const changeSubj=s=>{setSubj(s);setDateTab(null);setAnswers({});setSubmitted({});};
+  const changeDate=d=>{setDateTab(d);setAnswers({});setSubmitted({});};
+  const submit=q=>{
+    const ans=answers[q.id];if(!ans)return;
+    setSubmitted(p=>({...p,[q.id]:true}));
+    if(ans!==q.answer){
+      setWrongNotes(prev=>{
+        if(prev.find(n=>n.qId===q.id&&n.studentId===studentId))return prev;
+        return[...prev,{id:Date.now()+Math.random(),qId:q.id,studentId,subject:q.subject,type:"OX",question:q.question,answer:q.answer,explanation:q.explanation||"",date:q.date}];
+      });
     }
-  }
-
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
-  }
+  };
+  if(!oxQuestions.length) return(
+    <div style={{textAlign:"center",padding:"40px 0"}}><div style={{fontSize:40,marginBottom:12}}>📭</div><div style={{color:C.gray,fontWeight:600}}>등록된 OX 문제가 없어요</div></div>
+  );
+  return(
+    <div>
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:12,color:C.gray,fontWeight:600,marginBottom:6}}>과목 선택</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {REVIEW_SUBJECTS.map(s=>{
+            const cnt=oxQuestions.filter(q=>q.subject===s).length;
+            return <button key={s} onClick={()=>changeSubj(s)} style={{padding:"6px 16px",borderRadius:20,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,background:subj===s?(SC[s]||C.primary):C.grayLight,color:subj===s?"#fff":C.text}}>{s} <span style={{fontSize:11,opacity:.8}}>({cnt})</span></button>;
+          })}
+        </div>
+      </div>
+      {!dates.length?<div style={{color:C.textMuted,fontSize:13,textAlign:"center",padding:"20px 0"}}>{subj} 문제가 없습니다.</div>:(
+        <>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,color:C.gray,fontWeight:600,marginBottom:6}}>📅 날짜 선택</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {dates.map(d=>{
+                const cnt=subjQs.filter(q=>q.date===d).length;
+                const done=subjQs.filter(q=>q.date===d&&submitted[q.id]).length;
+                return <button key={d} onClick={()=>changeDate(d)} style={{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,background:activeDate===d?C.purple:C.grayLight,color:activeDate===d?"#fff":C.text}}>{d} <span style={{fontSize:11,opacity:.85}}>({done}/{cnt})</span></button>;
+              })}
+            </div>
+          </div>
+          {filtered.length===0?<div style={{color:C.textMuted,fontSize:13,textAlign:"center",padding:"20px 0"}}>이 날짜에 문제가 없습니다.</div>:(
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div style={{fontSize:13,color:C.gray}}>총 {filtered.length}문제 | <span style={{color:C.accent,fontWeight:600}}>정답 {filtered.filter(q=>submitted[q.id]&&answers[q.id]===q.answer).length}</span> / <span style={{color:C.danger,fontWeight:600}}>오답 {filtered.filter(q=>submitted[q.id]&&answers[q.id]!==q.answer).length}</span></div>
+              {filtered.map((q,idx)=>{
+                const ans=answers[q.id],done=submitted[q.id],correct=done&&ans===q.answer;
+                return(
+                  <div key={q.id} style={{background:C.white,borderRadius:14,padding:18,boxShadow:"0 2px 8px rgba(0,0,0,.08)",borderLeft:"4px solid "+(done?(correct?C.accent:C.danger):C.purple)}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <span style={{background:C.purpleLight,color:C.purple,borderRadius:20,padding:"2px 10px",fontSize:12,fontWeight:600}}>{idx+1}번</span>
+                      {done&&<span style={{fontWeight:700,fontSize:13,color:correct?C.accent:C.danger}}>{correct?"✅ 정답!":"❌ 오답 → 오답노트 저장됨"}</span>}
+                    </div>
+                    <div style={{fontWeight:600,fontSize:14,lineHeight:1.7,marginBottom:14}}>{q.question}</div>
+                    {!done?(
+                      <div>
+                        <div style={{display:"flex",gap:10,marginBottom:10}}>
+                          {["O","X"].map(a=><button key={a} onClick={()=>setAnswers(p=>({...p,[q.id]:a}))} style={btn(ans===a?(a==="O"?C.accent:C.danger):C.grayLight,ans===a?"#fff":C.text,{flex:1,fontSize:24,padding:"12px",borderRadius:10})}>{a}</button>)}
+                        </div>
+                        <button onClick={()=>submit(q)} disabled={!ans} style={btn(ans?C.purple:C.grayLight,ans?"#fff":C.textMuted,{width:"100%",padding:10})}>제출</button>
+                      </div>
+                    ):(
+                      <div style={{background:correct?C.accentLight:C.dangerLight,borderRadius:10,padding:"12px 14px",fontSize:13}}>
+                        <b>정답: {q.answer}</b> | 내 답: {ans}
+                        {q.explanation&&<div style={{marginTop:8,color:C.gray,lineHeight:1.6}}>{q.explanation}</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
-#docs {
-  border-right: 1px solid var(--border);
-
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
+function WrongNoteTab({wrongNotes,setWrongNotes,studentId}){
+  const [subj,setSubj]=useState(REVIEW_SUBJECTS[0]);
+  const [revealed,setRevealed]=useState({});
+  const [reAns,setReAns]=useState({});
+  const [reDone,setReDone]=useState({});
+  const my=wrongNotes.filter(n=>n.studentId===studentId&&n.subject===subj);
+  const all=wrongNotes.filter(n=>n.studentId===studentId);
+  const del=id=>setWrongNotes(prev=>prev.filter(n=>n.id!==id));
+  const reSubmit=note=>{
+    const ans=reAns[note.id];if(!ans)return;
+    setReDone(p=>({...p,[note.id]:true}));
+    if(ans===note.answer) setTimeout(()=>del(note.id),1200);
+  };
+  return(
+    <div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+        {REVIEW_SUBJECTS.map(s=>{
+          const cnt=all.filter(n=>n.subject===s).length;
+          return(
+            <button key={s} onClick={()=>{setSubj(s);setRevealed({});setReAns({});setReDone({});}}
+              style={{padding:"6px 16px",borderRadius:20,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,background:subj===s?(SC[s]||C.primary):C.grayLight,color:subj===s?"#fff":C.text}}>
+              {s}{cnt>0&&<span style={{background:C.danger,color:"#fff",borderRadius:"50%",fontSize:10,fontWeight:700,padding:"1px 5px",marginLeft:5}}>{cnt}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {!my.length?<div style={{textAlign:"center",padding:"40px 0"}}><div style={{fontSize:40,marginBottom:12}}>📭</div><div style={{color:C.gray,fontWeight:600}}>{subj} 오답노트가 비어 있어요!</div></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{color:C.textMuted,fontSize:13}}>총 {my.length}문제</div>
+          {my.map((note,idx)=>{
+            const isRev=revealed[note.id],ra=reAns[note.id],rd=reDone[note.id],rc=rd&&ra===note.answer;
+            return(
+              <div key={note.id} style={{background:C.white,borderRadius:14,padding:18,boxShadow:"0 2px 8px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.danger}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                  <span style={{background:C.dangerLight,color:C.danger,borderRadius:20,padding:"2px 10px",fontSize:12,fontWeight:600}}>오답 {idx+1}</span>
+                  <button onClick={()=>del(note.id)} style={btn(C.grayLight,C.danger,{padding:"4px 10px",fontSize:12})}>삭제</button>
+                </div>
+                <div style={{fontWeight:600,fontSize:14,lineHeight:1.7,marginBottom:14}}>{note.question}</div>
+                {!rd?(
+                  <div>
+                    <div style={{display:"flex",gap:10,marginBottom:10}}>
+                      {["O","X"].map(a=><button key={a} onClick={()=>setReAns(p=>({...p,[note.id]:a}))} style={btn(ra===a?(a==="O"?C.accent:C.danger):C.grayLight,ra===a?"#fff":C.text,{flex:1,fontSize:22,padding:"10px",borderRadius:10})}>{a}</button>)}
+                    </div>
+                    <button onClick={()=>reSubmit(note)} disabled={!ra} style={btn(ra?C.primary:C.grayLight,ra?"#fff":C.textMuted,{width:"100%",padding:10,marginBottom:8})}>제출</button>
+                  </div>
+                ):(
+                  <div style={{background:rc?C.accentLight:C.dangerLight,borderRadius:10,padding:"10px 14px",fontSize:13,marginBottom:8,fontWeight:600}}>
+                    {rc?"✅ 정답! 삭제됩니다.":"❌ 오답입니다. 다시 도전해보세요!"}
+                  </div>
+                )}
+                {note.explanation&&<button onClick={()=>setRevealed(p=>({...p,[note.id]:!p[note.id]}))} style={btn(isRev?C.warningLight:C.grayLight,isRev?C.warning:C.gray,{width:"100%",padding:8,fontSize:13})}>{isRev?"해설 닫기 ▲":"해설 보기 ▼"}</button>}
+                {isRev&&note.explanation&&<div style={{background:C.warningLight,borderRadius:10,padding:"12px 14px",fontSize:13,lineHeight:1.7,marginTop:8}}><b style={{color:C.warning}}>📖 해설</b><br/>{note.explanation}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
-#next-steps ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-  margin: 32px 0 0;
-
-  .logo {
-    height: 18px;
-  }
-
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
-
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
-
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
+function StudentReport({student,reviewRows,examRows,oxQuestions,wrongNotes,setWrongNotes,onBack}){
+  const [section,setSection]=useState("review");
+  const [reviewSubj,setReviewSubj]=useState("헌법");
+  const [periodTab,setPeriodTab]=useState("전체");
+  const myReview=reviewRows.filter(r=>r.studentId===student.id);
+  const myPeriods=["전체",...[...new Set(myReview.map(r=>dateToPeriod(r.date)))].filter(Boolean).sort((a,b)=>PERIOD_LABELS.indexOf(a)-PERIOD_LABELS.indexOf(b))];
+  const myReviewF=periodTab==="전체"?myReview:myReview.filter(r=>dateToPeriod(r.date)===periodTab);
+  const myBySubj=myReviewF.filter(r=>r.subject===reviewSubj);
+  const reviewDates=[...new Set(myBySubj.map(r=>r.date))].sort();
+  const reviewChartData=reviewDates.map(date=>{
+    const myRow=myBySubj.find(r=>r.date===date);
+    const myCurr=myRow?.curriculum;
+    const all=reviewRows.filter(r=>r.date===date&&r.curriculum===myCurr&&r.subject===reviewSubj);
+    const sorted=all.map(r=>r.score).sort((a,b)=>b-a);
+    const myScore=myRow?.score;
+    const rank=myScore!=null?sorted.filter(s=>s>myScore).length+1:null;
+    const top20=sorted[Math.max(0,Math.ceil(sorted.length*0.2)-1)]??null;
+    return{date,score:myScore,rank,total:sorted.length,top20,period:dateToPeriod(date)};
+  });
+  const myExam=examRows.filter(r=>r.studentId===student.id).sort((a,b)=>a.date.localeCompare(b.date));
+  const examDates=[...new Set(myExam.map(r=>r.date))].sort();
+  const examChartData=examDates.map(date=>{
+    const myRow=myExam.find(r=>r.date===date);
+    const myCurr=myRow?.curriculum;
+    const all=examRows.filter(r=>r.date===date&&r.curriculum===myCurr);
+    const sorted=all.map(r=>r.총점).filter(v=>v!=null).sort((a,b)=>b-a);
+    const myScore=myRow?.총점;
+    const rank=myScore!=null?sorted.filter(s=>s>myScore).length+1:null;
+    const top20=sorted[Math.max(0,Math.ceil(sorted.length*0.2)-1)]??null;
+    return{date,헌법:myRow?.헌법,형사법:myRow?.형사법,경찰학:myRow?.경찰학,총점:myScore,rank,total:sorted.length,top20,curriculum:myCurr};
+  });
+  const rScores=myReviewF.map(r=>r.score).filter(v=>v!=null);
+  const reviewAvg=rScores.length?Math.round(rScores.reduce((a,b)=>a+b,0)/rScores.length):null;
+  const eScores=myExam.map(r=>r.총점).filter(v=>v!=null);
+  const examAvg=eScores.length?Math.round(eScores.reduce((a,b)=>a+b,0)/eScores.length):null;
+  const overall=reviewAvg!=null&&examAvg!=null?Math.round(reviewAvg*0.4+examAvg*0.6):(reviewAvg??examAvg);
+  const wrongCnt=wrongNotes.filter(n=>n.studentId===student.id).length;
+  const SECS=[{key:"review",label:"📝 복습테스트",color:C.accent},{key:"exam",label:"📋 정기고사",color:C.warning},{key:"ox",label:"⭕ OX문제",color:C.purple},{key:"wrong",label:"✏️ 오답노트",color:C.danger}];
+  return(
+    <div>
+      <button onClick={onBack} style={btn(C.grayLight,C.text,{marginBottom:20})}>← 뒤로</button>
+      <div style={{background:C.primaryLight,borderRadius:14,padding:20,marginBottom:20}}>
+        <div style={{fontSize:22,fontWeight:800,color:C.primary}}>{student.name}</div>
+        <div style={{color:C.gray,fontSize:14,marginTop:4}}>응시번호: <b>{student.id}</b> | {student.course} | {student.className} | 커리: <b style={{color:C.primary}}>{student.curriculum}</b></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:22}}>
+        {[{label:"종합 지표",val:overall,color:C.primary},{label:"복습테스트 평균",val:reviewAvg,color:C.accent},{label:"정기고사 평균",val:examAvg,color:C.warning}].map(({label,val,color})=>(
+          <div key={label} style={{background:C.white,border:"2px solid "+color,borderRadius:12,padding:14,textAlign:"center"}}>
+            <div style={{fontSize:11,color:C.gray,marginBottom:6}}>{label}</div>
+            <span style={{background:val!=null?color:C.grayLight,color:val!=null?"#fff":C.textMuted,borderRadius:20,padding:"3px 12px",fontWeight:800,fontSize:16}}>{val!=null?val+"점":"-"}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:20}}>
+        {SECS.map(({key,label,color})=>(
+          <button key={key} onClick={()=>setSection(key)} style={btn(section===key?color:C.grayLight,section===key?"#fff":C.text,{padding:"10px 4px",fontSize:13,borderRadius:10,position:"relative"})}>
+            {label}{key==="wrong"&&wrongCnt>0&&<span style={{background:C.danger,color:"#fff",borderRadius:"50%",fontSize:10,fontWeight:700,padding:"1px 5px",marginLeft:4}}>{wrongCnt}</span>}
+          </button>
+        ))}
+      </div>
+      {section==="review"&&(
+        <div style={{background:C.white,borderRadius:16,padding:20,boxShadow:"0 2px 8px rgba(0,0,0,.08)",border:"2px solid "+C.accentLight}}>
+          <div style={{fontWeight:800,fontSize:16,color:C.accent,marginBottom:4}}>📝 복습테스트</div>
+          <div style={{color:C.textMuted,fontSize:12,marginBottom:14}}>커리: <b>{student.curriculum}</b></div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,color:C.gray,fontWeight:600,marginBottom:6}}>📅 월별 선택</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{myPeriods.map(p=><button key={p} onClick={()=>setPeriodTab(p)} style={{padding:"6px 14px",borderRadius:20,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,background:periodTab===p?C.primary:C.grayLight,color:periodTab===p?"#fff":C.text}}>{p}</button>)}</div>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>{REVIEW_SUBJECTS.map(s=><button key={s} onClick={()=>setReviewSubj(s)} style={{padding:"7px 16px",borderRadius:20,border:"none",cursor:"pointer",fontWeight:600,fontSize:13,background:reviewSubj===s?(SC[s]||C.primary):C.grayLight,color:reviewSubj===s?"#fff":C.text}}>{s}</button>)}</div>
+          <div style={{background:C.grayLight,borderRadius:12,padding:16,marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:14,color:SC[reviewSubj],marginBottom:10}}>{reviewSubj} — 날짜별 성적 추이</div>
+            {reviewChartData.length>0?<CompareChart myPts={reviewChartData.map(d=>d.score)} top20Pts={reviewChartData.map(d=>d.top20)} xLabels={reviewChartData.map(d=>d.date.slice(5))} color={SC[reviewSubj]||C.primary}/>:<p style={{color:C.textMuted,fontSize:13}}>데이터 없음</p>}
+          </div>
+          {reviewChartData.length>0&&(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:400}}>
+                <thead><tr style={{background:C.grayLight}}>{["날짜","기간","점수","석차","상위20%","차이"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"center",color:C.gray,fontWeight:600}}>{h}</th>)}</tr></thead>
+                <tbody>{reviewChartData.map((d,i)=>{
+                  const diff=d.top20!=null&&d.score!=null?d.score-d.top20:null;
+                  return(<tr key={i} style={{borderTop:"1px solid #F3F4F6",background:i%2===0?C.white:"#FAFAFA"}}>
+                    <td style={{padding:"8px 10px",textAlign:"center",fontWeight:600}}>{d.date}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:C.gray}}>{d.period}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center"}}><ScorePill score={d.score}/></td>
+                    <td style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:C.primary}}>{d.rank!=null?d.rank+"/"+d.total+"위":"-"}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:C.top20,fontWeight:700}}>{d.top20!=null?d.top20+"점":"-"}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:diff!=null?(diff>=0?C.accent:C.danger):C.textMuted}}>{diff!=null?(diff>=0?"+"+diff:diff)+"점":"-"}</td>
+                  </tr>);
+                })}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {section==="exam"&&(
+        <div style={{background:C.white,borderRadius:16,padding:20,boxShadow:"0 2px 8px rgba(0,0,0,.08)",border:"2px solid "+C.warningLight}}>
+          <div style={{fontWeight:800,fontSize:16,color:C.warning,marginBottom:4}}>📋 정기고사</div>
+          <div style={{color:C.textMuted,fontSize:12,marginBottom:14}}>월별 총점과 상위 20% 비교</div>
+          <div style={{background:C.grayLight,borderRadius:12,padding:16,marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:14,color:C.warning,marginBottom:10}}>총점 월별 추이</div>
+            {examChartData.length>0?<CompareChart myPts={examChartData.map(d=>d.총점)} top20Pts={examChartData.map(d=>d.top20)} xLabels={examChartData.map(d=>d.date.slice(0,7))} color={C.warning}/>:<p style={{color:C.textMuted,fontSize:13}}>데이터 없음</p>}
+          </div>
+          {examChartData.length>0&&(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:500}}>
+                <thead><tr style={{background:C.grayLight}}>{["월","과정","헌법","형사법","경찰학","총점","석차","상위20%"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"center",color:SC[h]||C.gray,fontWeight:600}}>{h}</th>)}</tr></thead>
+                <tbody>{examChartData.map((d,i)=>(
+                  <tr key={i} style={{borderTop:"1px solid #F3F4F6",background:i%2===0?C.white:"#FAFAFA"}}>
+                    <td style={{padding:"8px 10px",textAlign:"center",fontWeight:600}}>{d.date.slice(0,7)}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:C.gray}}>{d.curriculum}</td>
+                    {["헌법","형사법","경찰학"].map(s=><td key={s} style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:SC[s]}}>{d[s]??"-"}</td>)}
+                    <td style={{padding:"8px 10px",textAlign:"center"}}><ScorePill score={d.총점}/></td>
+                    <td style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:C.primary}}>{d.rank!=null?d.rank+"/"+d.total+"위":"-"}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:C.top20,fontWeight:700}}>{d.top20!=null?d.top20+"점":"-"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {section==="ox"&&(
+        <div style={{background:C.white,borderRadius:16,padding:20,boxShadow:"0 2px 8px rgba(0,0,0,.08)",border:"2px solid "+C.purpleLight}}>
+          <div style={{fontWeight:800,fontSize:16,color:C.purple,marginBottom:14}}>⭕ OX 문제</div>
+          <OXTab oxQuestions={oxQuestions} setWrongNotes={setWrongNotes} studentId={student.id}/>
+        </div>
+      )}
+      {section==="wrong"&&(
+        <div style={{background:C.white,borderRadius:16,padding:20,boxShadow:"0 2px 8px rgba(0,0,0,.08)",border:"2px solid "+C.dangerLight}}>
+          <div style={{fontWeight:800,fontSize:16,color:C.danger,marginBottom:14}}>✏️ 오답노트</div>
+          <WrongNoteTab wrongNotes={wrongNotes} setWrongNotes={setWrongNotes} studentId={student.id}/>
+        </div>
+      )}
+    </div>
+  );
 }
 
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
+function LoginScreen({students,passwords,setPasswords,onLogin,onAdminLogin}){
+  const [mode,setMode]=useState("login");
+  const [id,setId]=useState(""); const [pw,setPw]=useState(""); const [err,setErr]=useState("");
+  const [pending,setPending]=useState(null);
+  const [newPw,setNewPw]=useState(""); const [newPw2,setNewPw2]=useState("");
+  const [adminPw,setAdminPw]=useState("");
+  const [rId,setRId]=useState(""); const [rOld,setROld]=useState("");
+  const go=m=>{setMode(m);setErr("");};
+  const inp={width:"100%",padding:"10px 14px",borderRadius:8,border:"1px solid #D1D5DB",fontSize:15,marginTop:6,marginBottom:14,boxSizing:"border-box"};
+  const doLogin=()=>{
+    if(!id.trim()){setErr("응시번호를 입력해 주세요.");return;}
+    if(!pw){setErr("비밀번호를 입력해 주세요.");return;}
+    const s=students.find(x=>x.id===id.trim());
+    if(!s){setErr("응시번호를 확인해 주세요.");return;}
+    const stored=passwords[s.id],init=defaultPw(s.id);
+    if(!stored){if(pw===init){setPending(s);setNewPw("");setNewPw2("");go("setup");}else setErr("비밀번호가 틀렸습니다. (초기: 응시번호)");}
+    else{if(pw===stored)onLogin(s);else setErr("비밀번호가 틀렸습니다.");}
+  };
+  const doSetup=()=>{
+    if(newPw.length<6){setErr("6자리 이상 입력해 주세요.");return;}
+    if(newPw!==newPw2){setErr("비밀번호가 일치하지 않습니다.");return;}
+    setPasswords(prev=>({...prev,[pending.id]:newPw}));onLogin(pending);
+  };
+  const doReset=()=>{
+    const s=students.find(x=>x.id===rId.trim());
+    if(!s){setErr("응시번호를 확인해 주세요.");return;}
+    const stored=passwords[s.id]||defaultPw(s.id);
+    if(rOld!==stored){setErr("현재 비밀번호가 틀렸습니다.");return;}
+    if(newPw.length<6){setErr("6자리 이상 입력해 주세요.");return;}
+    if(newPw!==newPw2){setErr("비밀번호가 일치하지 않습니다.");return;}
+    setPasswords(prev=>({...prev,[s.id]:newPw}));alert("✅ 비밀번호가 변경되었습니다.");go("login");
+  };
+  return(
+    <div style={{maxWidth:380,margin:"60px auto",padding:32,background:C.white,borderRadius:20,boxShadow:"0 4px 24px rgba(0,0,0,.1)"}}>
+      <div style={{textAlign:"center",marginBottom:28}}>
+        <div style={{fontSize:40}}>🎓</div>
+        <div style={{fontSize:24,fontWeight:800,color:C.primary,marginTop:8}}>성적 확인 시스템</div>
+        <div style={{color:C.gray,fontSize:14,marginTop:4}}>학원 성적 관리 플랫폼</div>
+      </div>
+      {mode==="login"&&(<div>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>응시번호</label>
+        <input value={id} onChange={e=>setId(e.target.value)} onKeyDown={e=>e.key==="Enter"&&document.getElementById("lpw")?.focus()} placeholder="예: 2024001" style={inp}/>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>비밀번호</label>
+        <input id="lpw" type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doLogin()} placeholder="초기 비밀번호: 응시번호" style={inp}/>
+        {err&&<div style={{color:C.danger,fontSize:13,marginBottom:10}}>{err}</div>}
+        <button onClick={doLogin} style={btn(C.primary,"#fff",{width:"100%",padding:12,marginBottom:12})}>성적 확인하기</button>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <span onClick={()=>{setRId("");setROld("");setNewPw("");setNewPw2("");go("reset");}} style={{color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>비밀번호 재설정</span>
+          <span onClick={()=>go("admin")} style={{color:C.gray,fontSize:13,cursor:"pointer",textDecoration:"underline"}}>관리자 로그인</span>
+        </div>
+      </div>)}
+      {mode==="setup"&&pending&&(<div>
+        <div style={{background:C.primaryLight,borderRadius:10,padding:"12px 14px",fontSize:13,color:C.primary,marginBottom:16,lineHeight:1.6}}>👋 <b>{pending.name}</b>님, 처음 로그인하셨어요!<br/>새 비밀번호를 설정해 주세요.</div>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>새 비밀번호 (6자리 이상)</label>
+        <input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="새 비밀번호" style={inp}/>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>비밀번호 확인</label>
+        <input type="password" value={newPw2} onChange={e=>setNewPw2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doSetup()} placeholder="비밀번호 재입력" style={inp}/>
+        {err&&<div style={{color:C.danger,fontSize:13,marginBottom:10}}>{err}</div>}
+        <button onClick={doSetup} style={btn(C.primary,"#fff",{width:"100%",padding:12})}>설정 후 입장</button>
+      </div>)}
+      {mode==="reset"&&(<div>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:14,color:C.primary}}>🔑 비밀번호 재설정</div>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>응시번호</label><input value={rId} onChange={e=>setRId(e.target.value)} placeholder="응시번호" style={inp}/>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>현재 비밀번호</label><input type="password" value={rOld} onChange={e=>setROld(e.target.value)} placeholder="현재 비밀번호" style={inp}/>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>새 비밀번호 (6자리 이상)</label><input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="새 비밀번호" style={inp}/>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>새 비밀번호 확인</label><input type="password" value={newPw2} onChange={e=>setNewPw2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doReset()} placeholder="새 비밀번호 재입력" style={inp}/>
+        {err&&<div style={{color:C.danger,fontSize:13,marginBottom:10}}>{err}</div>}
+        <button onClick={doReset} style={btn(C.primary,"#fff",{width:"100%",padding:12,marginBottom:10})}>변경하기</button>
+        <button onClick={()=>go("login")} style={btn(C.grayLight,C.text,{width:"100%",padding:10})}>← 로그인으로</button>
+      </div>)}
+      {mode==="admin"&&(<div>
+        <label style={{fontSize:13,fontWeight:600,display:"block"}}>관리자 비밀번호</label>
+        <input type="password" value={adminPw} onChange={e=>setAdminPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&(adminPw==="admin1234"?onAdminLogin():setErr("비밀번호가 틀렸습니다."))} placeholder="관리자 비밀번호" style={inp}/>
+        {err&&<div style={{color:C.danger,fontSize:13,marginBottom:10}}>{err}</div>}
+        <button onClick={()=>adminPw==="admin1234"?onAdminLogin():setErr("비밀번호가 틀렸습니다.")} style={btn(C.primary,"#fff",{width:"100%",padding:12,marginBottom:10})}>관리자 입장</button>
+        <button onClick={()=>go("login")} style={btn(C.grayLight,C.text,{width:"100%",padding:10})}>← 학생 로그인</button>
+      </div>)}
+    </div>
+  );
 }
 
-.ticks {
-  position: relative;
-  width: 100%;
+function DeleteTab({students,setStudents,passwords,setPasswords,reviewRows,setReviewRows,examRows,setExamRows,materials,setMaterials,oxQuestions,setOxQuestions,showToast}){
+  const [confirm,setConfirm]=useState(null);
+  const [rF,setRF]=useState({date:"",studentId:""});
+  const [eF,setEF]=useState({date:"",studentId:""});
+  const ask=(label,action)=>setConfirm({label,action});
+  const doConfirm=()=>{confirm?.action();setConfirm(null);};
+  const fR=reviewRows.filter(r=>(!rF.date||r.date===rF.date)&&(!rF.studentId||r.studentId===rF.studentId));
+  const fE=examRows.filter(r=>(!eF.date||r.date===eF.date)&&(!eF.studentId||r.studentId===eF.studentId));
+  const sel={padding:"7px 10px",borderRadius:8,border:"1px solid #D1D5DB",fontSize:13,background:C.white,cursor:"pointer"};
+  return(
+    <div>
+      {confirm&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+          <div style={{background:C.white,borderRadius:16,padding:28,width:340,boxShadow:"0 8px 32px rgba(0,0,0,.2)",textAlign:"center"}}>
+            <div style={{fontSize:36,marginBottom:12}}>⚠️</div>
+            <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>정말 삭제할까요?</div>
+            <div style={{color:C.gray,fontSize:13,marginBottom:20,lineHeight:1.6}}>{confirm.label}</div>
+            <div style={{display:"flex",gap:10}}><button onClick={()=>setConfirm(null)} style={btn(C.grayLight,C.text,{flex:1})}>취소</button><button onClick={doConfirm} style={btn(C.danger,"#fff",{flex:1})}>삭제</button></div>
+          </div>
+        </div>
+      )}
+      <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.danger,marginBottom:16}}>
+        <div style={{fontWeight:700,fontSize:15,color:C.danger,marginBottom:14}}>🔴 전체 초기화</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          {[["학생 전체",()=>{setStudents([]);setPasswords({});showToast("✅ 학생 초기화");}],
+            ["복습테스트 전체",()=>{setReviewRows([]);showToast("✅ 복습테스트 초기화");}],
+            ["정기고사 전체",()=>{setExamRows([]);showToast("✅ 정기고사 초기화");}],
+            ["OX문제 전체",()=>{setOxQuestions([]);showToast("✅ OX문제 초기화");}],
+            ["⚡ 전체",()=>{setStudents([]);setPasswords({});setReviewRows([]);setExamRows([]);setMaterials([]);setOxQuestions([]);showToast("✅ 전체 초기화");}],
+          ].map(([l,a])=><button key={l} onClick={()=>ask(l+" 삭제 — 되돌릴 수 없습니다.",a)} style={btn(C.dangerLight,C.danger,{padding:"6px 12px",fontSize:12,borderRadius:6})}>🗑️ {l}</button>)}
+        </div>
+      </div>
+      {[{title:"📝 복습테스트",color:C.accent,flt:rF,setFlt:setRF,dates:[...new Set(reviewRows.map(r=>r.date))].sort().reverse(),ids:[...new Set(reviewRows.map(r=>r.studentId))],cnt:fR.length,del:()=>{setReviewRows(prev=>prev.filter(r=>!((!rF.date||r.date===rF.date)&&(!rF.studentId||r.studentId===rF.studentId))));showToast("✅ "+fR.length+"건 삭제");}},
+        {title:"📋 정기고사",color:C.warning,flt:eF,setFlt:setEF,dates:[...new Set(examRows.map(r=>r.date))].sort().reverse(),ids:[...new Set(examRows.map(r=>r.studentId))],cnt:fE.length,del:()=>{setExamRows(prev=>prev.filter(r=>!((!eF.date||r.date===eF.date)&&(!eF.studentId||r.studentId===eF.studentId))));showToast("✅ "+fE.length+"건 삭제");}},
+      ].map(({title,color,flt,setFlt,dates,ids,cnt,del})=>(
+        <div key={title} style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+color,marginBottom:16}}>
+          <div style={{fontWeight:700,fontSize:15,color,marginBottom:14}}>{title} 선택 삭제</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+            <select value={flt.date} onChange={e=>setFlt(p=>({...p,date:e.target.value}))} style={sel}><option value="">-- 날짜 전체 --</option>{dates.map(d=><option key={d} value={d}>{d}</option>)}</select>
+            <select value={flt.studentId} onChange={e=>setFlt(p=>({...p,studentId:e.target.value}))} style={sel}><option value="">-- 응시번호 전체 --</option>{ids.map(id=>{const st=students.find(s=>s.id===id);return<option key={id} value={id}>{id}{st?" ("+st.name+")":""}</option>;})}</select>
+            <button onClick={()=>ask(title+" "+cnt+"건 삭제",del)} style={btn(C.danger,"#fff",{padding:"7px 14px",fontSize:13})}>선택 삭제 ({cnt}건)</button>
+          </div>
+        </div>
+      ))}
+      <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.primary,marginBottom:16}}>
+        <div style={{fontWeight:700,fontSize:15,color:C.primary,marginBottom:14}}>👥 학생 개별 삭제</div>
+        {!students.length?<div style={{color:C.textMuted,fontSize:13}}>없음</div>:
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>{students.map(s=>(
+            <div key={s.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:C.grayLight,borderRadius:10}}>
+              <div style={{flex:1}}><span style={{fontWeight:700}}>{s.name}</span><span style={{color:C.gray,fontSize:12,marginLeft:8}}>{s.id} · {s.className}</span></div>
+              <button onClick={()=>ask(s.name+" 삭제",()=>{setStudents(prev=>prev.filter(x=>x.id!==s.id));setPasswords(prev=>{const n={...prev};delete n[s.id];return n;});showToast("✅ "+s.name+" 삭제");})} style={btn(C.dangerLight,C.danger,{padding:"5px 12px",fontSize:12})}>삭제</button>
+            </div>
+          ))}</div>}
+      </div>
+      <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.purple}}>
+        <div style={{fontWeight:700,fontSize:15,color:C.purple,marginBottom:14}}>⭕ OX문제 개별 삭제</div>
+        {!oxQuestions.length?<div style={{color:C.textMuted,fontSize:13}}>없음</div>:
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>{oxQuestions.map(q=>(
+            <div key={q.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:C.grayLight,borderRadius:10}}>
+              <div style={{flex:1}}><span style={{background:C.purpleLight,color:C.purple,borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:600,marginRight:8}}>{q.subject}</span><span style={{fontSize:13}}>{q.question.slice(0,40)}{q.question.length>40?"...":""}</span></div>
+              <button onClick={()=>ask("이 문제를 삭제합니다.",()=>{setOxQuestions(prev=>prev.filter(x=>x.id!==q.id));showToast("✅ 문제 삭제");})} style={btn(C.dangerLight,C.danger,{padding:"5px 12px",fontSize:12})}>삭제</button>
+            </div>
+          ))}</div>}
+      </div>
+    </div>
+  );
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
-  }
+function AdminPanel({students,setStudents,passwords,setPasswords,reviewRows,setReviewRows,examRows,setExamRows,wrongNotes,setWrongNotes,materials,setMaterials,oxQuestions,setOxQuestions,onLogout}){
+  const [tab,setTab]=useState("score");
+  const [toast,setToast]=useState("");
+  const [preview,setPreview]=useState(null);
+  const sRef=useRef(),rRef=useRef(),eRef=useRef(),mRef=useRef(),oxRef=useRef();
+  const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),3000);};
+  const dlTpl=(rows,sheet,file)=>{const ws=XLSX.utils.aoa_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,file);};
+  const handleExcel=(e,type)=>{
+    const file=e.target.files[0];if(!file)return;
+    const r=new FileReader();
+    r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      if(type==="student"){
+        const ns=rows.map(r=>({course:String(r["과정"]||"").trim(),className:String(r["반명"]||"").trim(),seat:String(r["좌석"]||"").trim(),id:String(r["응시번호"]||"").trim(),name:String(r["이름"]||"").trim(),penalty:Number(r["상벌점"]||0),phone:String(r["전화번호"]||"").trim(),gender:String(r["성별"]||"").trim(),curriculum:String(r["커리"]||"이론").trim()})).filter(s=>s.id&&s.name);
+        setStudents(prev=>{const m=new Map(prev.map(s=>[s.id,s]));ns.forEach(s=>m.set(s.id,s));return[...m.values()];});
+        showToast("✅ 학생 "+ns.length+"명 업로드!");
+      } else if(type==="review"){
+        const parsed=rows.map(row=>({date:parseDate(row["날짜"]),studentId:String(row["응시번호"]||"").trim(),curriculum:String(row["과정"]||"").trim(),subject:String(row["과목"]||"").trim(),score:Number(row["성적"])})).filter(r=>r.date&&r.studentId&&r.subject&&!isNaN(r.score));
+        setPreview({type:"review",rows:parsed});
+      } else {
+        const parsed=rows.map(row=>({date:parseDate(row["날짜"]),studentId:String(row["응시번호"]||"").trim(),curriculum:String(row["과정"]||"").trim(),헌법:row["성적-헌법"]!=null?Number(row["성적-헌법"]):null,형사법:row["성적-형사법"]!=null?Number(row["성적-형사법"]):null,경찰학:row["성적-경찰학"]!=null?Number(row["성적-경찰학"]):null,총점:row["성적-총점"]!=null?Number(row["성적-총점"]):null})).filter(r=>r.date&&r.studentId);
+        setPreview({type:"exam",rows:parsed});
+      }
+    };
+    r.readAsBinaryString(file);e.target.value="";
+  };
+  const applyPreview=()=>{
+    if(!preview)return;
+    if(preview.type==="review"){setReviewRows(prev=>{const next=[...prev];preview.rows.forEach(r=>{const idx=next.findIndex(x=>x.date===r.date&&x.studentId===r.studentId&&x.subject===r.subject);idx>=0?(next[idx]=r):next.push(r);});return next;});showToast("✅ "+preview.rows.length+"건 반영!");}
+    else{setExamRows(prev=>{const next=[...prev];preview.rows.forEach(r=>{const idx=next.findIndex(x=>x.date===r.date&&x.studentId===r.studentId);idx>=0?(next[idx]=r):next.push(r);});return next;});showToast("✅ "+preview.rows.length+"건 반영!");}
+    setPreview(null);
+  };
+  const dlOxTpl=()=>{
+    const ws=XLSX.utils.aoa_to_sheet([["날짜","과목","문제","OX정답","해설"],["2024-05-10","헌법","대한민국 헌법은 1948년에 제정되었다.","O","1948년 7월 17일 제헌헌법 공포"],["2024-05-10","형법","형법상 고의범만 처벌하는 것이 원칙이다.","O","형법 제13조 참고"],["2024-05-10","형소법","수사는 반드시 고소가 있어야 개시된다.","X","직권으로도 수사 개시 가능"],["2024-05-10","경찰학","경찰의 기본이념은 민주성, 법치성, 인권존중이다.","O","경찰법 제1조"]]);
+    ws["!cols"]=[{wch:12},{wch:10},{wch:50},{wch:8},{wch:50}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"OX문제");XLSX.writeFile(wb,"OX문제_업로드_양식.xlsx");
+  };
+  const handleOxExcel=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const r=new FileReader();
+    r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"binary"});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      if(!rows.length){showToast("❌ 파일이 비어 있습니다.");return;}
+      const getVal=(row,keys)=>{for(const k of keys){const found=Object.keys(row).find(rk=>rk.replace(/\s/g,"").toLowerCase()===k.replace(/\s/g,"").toLowerCase());if(found&&row[found]!=null&&String(row[found]).trim()!=="")return String(row[found]).trim();}return "";};
+      const parsed=rows.map(row=>({
+        id:Date.now()+Math.random(),
+        date:parseDate(getVal(row,["날짜","date","일자","시험일"]))||new Date().toISOString().slice(0,10),
+        subject:getVal(row,["과목","subject","과목명","분야"]),
+        question:getVal(row,["문제","question","문항","내용","지문","퀴즈"]),
+        answer:getVal(row,["OX정답","정답","answer","OX","ox"]).toUpperCase().replace("0","O"),
+        explanation:getVal(row,["해설","explanation","설명","해답","풀이"]),
+        type:"OX",
+      })).filter(q=>q.question&&(q.answer==="O"||q.answer==="X"))
+        .map(q=>({...q,subject:REVIEW_SUBJECTS.includes(q.subject)?q.subject:(REVIEW_SUBJECTS.find(s=>file.name.includes(s))||"헌법")}));
+      if(!parsed.length){showToast("❌ 유효한 문제가 없습니다.");if(rows[0])alert("파일의 열 이름: "+Object.keys(rows[0]).join(", "));return;}
+      setOxQuestions(prev=>[...prev,...parsed]);
+      showToast("✅ OX 문제 "+parsed.length+"개 등록 완료!");
+    };
+    r.readAsBinaryString(file);e.target.value="";
+  };
+  const handleMaterial=e=>{
+    const files=Array.from(e.target.files);if(!files.length)return;
+    const ok=files.filter(f=>[".pdf",".hwp",".hwpx"].some(ext=>f.name.toLowerCase().endsWith(ext)));
+    if(!ok.length){alert("PDF/HWP 파일만 가능합니다.");return;}
+    setMaterials(prev=>[...prev,...ok.map(f=>({id:Date.now()+Math.random(),name:f.name,type:f.name.includes("해설")?"해설":"문제",ext:f.name.split(".").pop().toLowerCase(),date:new Date().toISOString().slice(0,10),size:(f.size/1024).toFixed(1)+"KB"}))]);
+    showToast("✅ "+ok.length+"개 파일 저장!");e.target.value="";
+  };
+  const TS=t=>({padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:600,background:tab===t?C.primary:C.grayLight,color:tab===t?C.white:C.text});
+  return(
+    <div>
+      {toast&&<div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:"#1F2937",color:C.white,borderRadius:10,padding:"10px 22px",fontWeight:600,fontSize:14,zIndex:200}}>{toast}</div>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
+        <div style={{fontSize:22,fontWeight:800,color:C.primary}}>🛠️ 관리자 패널</div>
+        <button onClick={onLogout} style={btn(C.grayLight,C.text)}>로그아웃</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+        {[["score","📊 성적 업로드"],["students","👥 학생 관리"],["materials","📁 문제/해설"],["delete","🗑️ 데이터 삭제"]].map(([t,l])=><button key={t} style={TS(t)} onClick={()=>setTab(t)}>{l}</button>)}
+      </div>
+      {tab==="score"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {[{type:"review",label:"복습테스트",color:C.accent,light:C.accentLight,ref_:rRef,emoji:"📝",desc:"날짜 / 응시번호 / 과정 / 과목 / 성적",tpl:[["날짜","응시번호","과정","과목","성적"],["2024-05-10","2024001","이론","헌법",85]]},
+            {type:"exam",label:"정기고사",color:C.warning,light:C.warningLight,ref_:eRef,emoji:"📋",desc:"날짜 / 응시번호 / 과정 / 성적-헌법 / 성적-형사법 / 성적-경찰학 / 성적-총점",tpl:[["날짜","응시번호","과정","성적-헌법","성적-형사법","성적-경찰학","성적-총점"],["2024-05-31","2024001","이론",88,82,79,83]]},
+          ].map(({type,label,color,light,ref_,emoji,desc,tpl})=>(
+            <div key={type} style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+color}}>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>{emoji} {label} 성적 업로드</div>
+              <div style={{background:light,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.gray,marginBottom:12}}>열 순서: <b>{desc}</b></div>
+              <div style={{display:"flex",gap:10}}>
+                <button onClick={()=>dlTpl(tpl,label,label+"_양식.xlsx")} style={btn(light,color,{flex:1})}>📥 양식</button>
+                <button onClick={()=>ref_.current.click()} style={btn(color,"#fff",{flex:1})}>📤 업로드</button>
+                <input ref={ref_} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>handleExcel(e,type)}/>
+              </div>
+            </div>
+          ))}
+          <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>📊 성적 현황</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead><tr style={{background:C.grayLight}}>{["이름","커리","복습","정기고사"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"center",color:C.gray,fontWeight:600}}>{h}</th>)}</tr></thead>
+              <tbody>{students.map((st,i)=>(
+                <tr key={st.id} style={{borderTop:"1px solid #F3F4F6",background:i%2===0?C.white:"#FAFAFA"}}>
+                  <td style={{padding:"8px 12px",fontWeight:600}}>{st.name}</td>
+                  <td style={{padding:"8px 12px",textAlign:"center"}}><span style={{background:st.curriculum==="이론"?C.primaryLight:C.accentLight,color:st.curriculum==="이론"?C.primary:C.accent,borderRadius:20,padding:"2px 10px",fontSize:12,fontWeight:600}}>{st.curriculum}</span></td>
+                  <td style={{padding:"8px 12px",textAlign:"center",color:C.accent,fontWeight:700}}>{reviewRows.filter(r=>r.studentId===st.id).length}건</td>
+                  <td style={{padding:"8px 12px",textAlign:"center",color:C.warning,fontWeight:700}}>{examRows.filter(r=>r.studentId===st.id).length}건</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tab==="students"&&(
+        <div>
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            <button onClick={()=>dlTpl([["과정","반명","좌석","응시번호","이름","상벌점","전화번호","성별","커리"],["경찰공무원","A반","1","2024004","홍길동","0","010-0000-0000","남","이론"]],"학생","학생_양식.xlsx")} style={btn(C.accentLight,C.accent)}>📥 양식</button>
+            <button onClick={()=>sRef.current.click()} style={btn(C.accent)}>📤 업로드</button>
+            <input ref={sRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>handleExcel(e,"student")}/>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+              <thead><tr style={{background:C.grayLight}}>{["과정","반명","좌석","응시번호","이름","커리","성별","전화번호","상벌점","비밀번호"].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",fontSize:12,fontWeight:700,color:C.gray}}>{h}</th>)}</tr></thead>
+              <tbody>{students.map((s,i)=>(
+                <tr key={s.id} style={{borderTop:"1px solid #F3F4F6",background:i%2===0?C.white:"#FAFAFA"}}>
+                  <td style={{padding:"10px 12px",fontSize:13}}>{s.course}</td>
+                  <td style={{padding:"10px 12px",fontSize:13}}>{s.className}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,textAlign:"center"}}>{s.seat}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,color:C.gray}}>{s.id}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600}}>{s.name}</td>
+                  <td style={{padding:"10px 12px"}}><span style={{background:s.curriculum==="이론"?C.primaryLight:C.accentLight,color:s.curriculum==="이론"?C.primary:C.accent,borderRadius:20,padding:"2px 8px",fontSize:12,fontWeight:600}}>{s.curriculum}</span></td>
+                  <td style={{padding:"10px 12px",fontSize:13,textAlign:"center"}}>{s.gender}</td>
+                  <td style={{padding:"10px 12px",fontSize:12,color:C.gray}}>{s.phone}</td>
+                  <td style={{padding:"10px 12px",fontSize:13,textAlign:"center",color:s.penalty>0?C.danger:s.penalty<0?C.accent:C.gray,fontWeight:600}}>{s.penalty>0?"+"+s.penalty:s.penalty}</td>
+                  <td style={{padding:"10px 12px"}}>{passwords[s.id]?<button onClick={()=>{if(window.confirm(s.name+" 비밀번호 초기화?")){setPasswords(prev=>{const n={...prev};delete n[s.id];return n;});showToast("✅ "+s.name+" 초기화");}}} style={btn(C.dangerLight,C.danger,{padding:"4px 10px",fontSize:12})}>초기화</button>:<span style={{color:C.textMuted,fontSize:12}}>미설정</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tab==="materials"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.purple}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>⭕ OX 문제 엑셀 업로드</div>
+            <div style={{background:C.purpleLight,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.gray,marginBottom:12,lineHeight:1.7}}>열 순서: <b>날짜 / 과목 / 문제 / OX정답 / 해설</b><br/>과목: 헌법/형법/형소법/경찰학 | OX정답: O 또는 X</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={dlOxTpl} style={btn(C.purpleLight,C.purple,{flex:1})}>📥 양식 다운로드</button>
+              <button onClick={()=>oxRef.current.click()} style={btn(C.purple,"#fff",{flex:1})}>📤 엑셀 업로드</button>
+              <input ref={oxRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleOxExcel}/>
+            </div>
+          </div>
+          <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>⭕ 등록된 OX 문제 현황</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+              {REVIEW_SUBJECTS.map(s=>{const cnt=oxQuestions.filter(q=>q.subject===s).length;return(<div key={s} style={{background:C.grayLight,borderRadius:10,padding:"12px 16px",textAlign:"center",minWidth:80}}><div style={{fontSize:12,color:SC[s]||C.gray,fontWeight:600,marginBottom:4}}>{s}</div><div style={{fontSize:22,fontWeight:800,color:C.text}}>{cnt}</div><div style={{fontSize:11,color:C.textMuted}}>문제</div></div>);})}
+            </div>
+            {[...new Set(oxQuestions.map(q=>q.date))].sort().reverse().slice(0,5).map(date=>(
+              <div key={date} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.grayLight,borderRadius:8,marginBottom:6,fontSize:13}}>
+                <span style={{fontWeight:600}}>{date}</span>
+                <div style={{display:"flex",gap:6}}>{REVIEW_SUBJECTS.map(s=>{const cnt=oxQuestions.filter(q=>q.date===date&&q.subject===s).length;return cnt>0?<span key={s} style={{background:(SC[s]||C.primary)+"22",color:SC[s]||C.primary,borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:600}}>{s} {cnt}개</span>:null;})}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)",borderLeft:"4px solid "+C.teal}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>📁 원본 파일 업로드 (PDF/HWP)</div>
+            <div style={{background:C.tealLight,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.gray,marginBottom:12}}>파일명에 <b>"해설"</b>이 포함되면 해설로 분류됩니다.</div>
+            <button onClick={()=>mRef.current.click()} style={btn(C.teal,"#fff",{width:"100%",padding:12})}>📤 파일 업로드</button>
+            <input ref={mRef} type="file" accept=".pdf,.hwp,.hwpx" multiple style={{display:"none"}} onChange={handleMaterial}/>
+          </div>
+          {materials.length>0&&(
+            <div style={{background:C.white,borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,.08)"}}>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>저장된 파일 ({materials.length}개)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {materials.map(m=>(
+                  <div key={m.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:C.grayLight,borderRadius:10}}>
+                    <div style={{fontSize:20}}>{m.type==="해설"?"📖":"📝"}</div>
+                    <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.name}</div><div style={{color:C.textMuted,fontSize:12,marginTop:2}}>{m.type} · {(m.ext||"").toUpperCase()} · {m.size}</div></div>
+                    <button onClick={()=>setMaterials(prev=>prev.filter(x=>x.id!==m.id))} style={btn(C.dangerLight,C.danger,{padding:"4px 10px",fontSize:12})}>삭제</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {tab==="delete"&&(
+        <DeleteTab students={students} setStudents={setStudents} passwords={passwords} setPasswords={setPasswords}
+          reviewRows={reviewRows} setReviewRows={setReviewRows} examRows={examRows} setExamRows={setExamRows}
+          materials={materials} setMaterials={setMaterials} oxQuestions={oxQuestions} setOxQuestions={setOxQuestions}
+          showToast={showToast}/>
+      )}
+      {preview&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100}}>
+          <div style={{background:C.white,borderRadius:16,padding:28,width:560,maxHeight:"75vh",display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,.2)"}}>
+            <div style={{fontWeight:800,fontSize:18,marginBottom:4}}>{preview.type==="review"?"📝 복습테스트":"📋 정기고사"} 미리보기</div>
+            <div style={{color:C.gray,fontSize:13,marginBottom:16}}>총 {preview.rows.length}건</div>
+            <div style={{overflowY:"auto",flex:1,borderRadius:8,border:"1px solid #E5E7EB"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead style={{position:"sticky",top:0,background:C.grayLight}}>
+                  <tr>{(preview.type==="review"?["날짜","응시번호","과정","과목","성적"]:["날짜","응시번호","과정","헌법","형사법","경찰학","총점"]).map(h=><th key={h} style={{padding:"8px",color:SC[h]||C.gray}}>{h}</th>)}</tr>
+                </thead>
+                <tbody>{preview.rows.map((r,i)=>(
+                  <tr key={i} style={{borderTop:"1px solid #F3F4F6",background:i%2===0?C.white:"#FAFAFA"}}>
+                    {(preview.type==="review"?[r.date,r.studentId,r.curriculum,r.subject,r.score]:[r.date,r.studentId,r.curriculum,r.헌법,r.형사법,r.경찰학,r.총점]).map((v,j)=><td key={j} style={{padding:"7px 8px",textAlign:"center"}}>{v??"-"}</td>)}
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:20}}>
+              <button onClick={()=>setPreview(null)} style={btn(C.grayLight,C.text,{flex:1})}>취소</button>
+              <button onClick={applyPreview} style={btn(C.primary,"#fff",{flex:1})}>반영하기</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
-  }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
-  }
+export default function App(){
+  const [students,    setStudents]    = useState([]);
+  const [passwords,   setPasswords]   = useState({});
+  const [reviewRows,  setReviewRows]  = useState([]);
+  const [examRows,    setExamRows]    = useState([]);
+  const [wrongNotes,  setWrongNotes]  = useState([]);
+  const [materials,   setMaterials]   = useState([]);
+  const [oxQuestions, setOxQuestions] = useState([]);
+  const [view,        setView]        = useState("login");
+  const [currentStudent, setCurrentStudent] = useState(null);
+  return(
+    <div style={{minHeight:"100vh",background:"#F8FAFC",fontFamily:"'Segoe UI',sans-serif",padding:view==="login"?0:20}}>
+      <div style={{maxWidth:720,margin:"0 auto"}}>
+        {view==="login"&&<LoginScreen students={students} passwords={passwords} setPasswords={setPasswords} onLogin={s=>{setCurrentStudent(s);setView("student");}} onAdminLogin={()=>setView("admin")}/>}
+        {view==="student"&&currentStudent&&<StudentReport student={currentStudent} reviewRows={reviewRows} examRows={examRows} oxQuestions={oxQuestions} wrongNotes={wrongNotes} setWrongNotes={setWrongNotes} onBack={()=>setView("login")}/>}
+        {view==="admin"&&<AdminPanel students={students} setStudents={setStudents} passwords={passwords} setPasswords={setPasswords} reviewRows={reviewRows} setReviewRows={setReviewRows} examRows={examRows} setExamRows={setExamRows} wrongNotes={wrongNotes} setWrongNotes={setWrongNotes} materials={materials} setMaterials={setMaterials} oxQuestions={oxQuestions} setOxQuestions={setOxQuestions} onLogout={()=>setView("login")}/>}
+      </div>
+    </div>
+  );
 }
